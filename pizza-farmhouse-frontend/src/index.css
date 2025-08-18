@@ -1,0 +1,13 @@
+/* Import the Poppins font from Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Apply the theme's base styles to the entire app */
+@layer base {
+  body {
+    @apply bg-background text-secondary font-sans;
+  }
+}

@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- PUBLIC-READ, ADMIN-WRITE COLLECTIONS ---
+    // Anyone can read the menu and promotions. This is essential for customers.
+    // Only an admin can create, update, or delete them.
+    match /menu/{docId} {
+      allow read: if true;
+      allow write: if request.auth.token.admin == true;
+    }
+    match /promotions/{docId} {
+      allow read: if true;
+      allow write: if request.auth.token.admin == true;
+    }
+
+    // --- ORDERS COLLECTION ---
+    // Logged-in (non-guest) users can create their own orders.
+    // They can only be read/updated by the user who created them or an admin.
+    match /orders/{orderId} {
+      allow create: if request.auth.uid == request.resource.data.userId;
+      allow read, update: if request.auth.token.admin == true || request.auth.uid == resource.data.userId;
+    }
+
+    // --- USERS COLLECTION ---
+    // Users can create and manage their own profile. Admin can read for support.
+    match /users/{userId} {
+      allow create: if request.auth.uid == userId;
+      allow read, update: if request.auth.uid == userId || request.auth.token.admin == true;
+    }
+  }
+}

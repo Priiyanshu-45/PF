@@ -1,0 +1,47 @@
+/* src/components/StarBorder.css */
+.star-border-container {
+  position: relative;
+  overflow: hidden;
+  display: inline-block;
+  width: 100%;
+}
+
+.inner-content {
+  position: relative;
+  z-index: 1;
+}
+
+.border-gradient-top,
+.border-gradient-bottom {
+  position: absolute;
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  filter: blur(10px);
+  z-index: 0;
+  pointer-events: none;
+}
+
+.border-gradient-top {
+  top: 0;
+  left: 0;
+  transform: translate(-50%, -50%);
+  animation: border-animation-top linear infinite;
+}
+
+.border-gradient-bottom {
+  bottom: 0;
+  right: 0;
+  transform: translate(50%, 50%);
+  animation: border-animation-bottom linear infinite;
+}
+
+@keyframes border-animation-top {
+  0% { transform: translate(-50%, -50%) rotate(0deg); }
+  100% { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+@keyframes border-animation-bottom {
+  0% { transform: translate(50%, 50%) rotate(0deg); }
+  100% { transform: translate(50%, 50%) rotate(360deg); }
+}
