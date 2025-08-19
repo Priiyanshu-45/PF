@@ -1,4 +1,3 @@
-// src/context/CartContext.js
 import React, { createContext, useContext, useReducer, useEffect } from "react";
 
 const CartContext = createContext();
@@ -8,11 +7,9 @@ const loadInitialState = () => {
   try {
     const serializedState = localStorage.getItem('pizzaFarmhouseCart');
     if (serializedState === null) {
-      // No state in localStorage, return the default initial state
       return { items: [] };
     }
     const parsedState = JSON.parse(serializedState);
-    // Ensure what we loaded is valid, otherwise return default
     return Array.isArray(parsedState.items) ? parsedState : { items: [] };
   } catch (err) {
     console.error("Could not load cart from localStorage", err);
@@ -21,48 +18,63 @@ const loadInitialState = () => {
 };
 
 function cartReducer(state, action) {
-  // ... (Your cartReducer function remains exactly the same)
   switch (action.type) {
     case "ADD_ITEM":
-      const existingIndex = state.items.findIndex(
-        i => i.name === action.item.name && i.size === action.item.size
+      const existingItem = state.items.find(item =>
+        item.id === action.item.id &&
+        item.size === action.item.size &&
+        JSON.stringify(item.addons) === JSON.stringify(action.item.addons) &&
+        JSON.stringify(item.crust) === JSON.stringify(action.item.crust)
       );
-      if (existingIndex > -1) {
-        const updatedItems = [...state.items];
-        updatedItems[existingIndex].qty += action.item.qty;
-        return { ...state, items: updatedItems };
+
+      if (existingItem) {
+        return {
+          ...state,
+          items: state.items.map(item =>
+            item.id === action.item.id &&
+            item.size === action.item.size &&
+            JSON.stringify(item.addons) === JSON.stringify(action.item.addons) &&
+            JSON.stringify(item.crust) === JSON.stringify(action.item.crust)
+              ? { ...item, qty: item.qty + action.item.qty }
+              : item
+          ),
+        };
       }
       return { ...state, items: [...state.items, action.item] };
+
     case "REMOVE_ITEM":
+      // Your existing logic is slightly different from the new one.
+      // We will keep the original logic for simplicity and correctness with the existing code.
       return {
         ...state,
         items: state.items.filter((_, i) => i !== action.index),
       };
+
     case "UPDATE_QTY":
       const updatedItemsQty = [...state.items];
       updatedItemsQty[action.index].qty = action.qty;
       return { ...state, items: updatedItemsQty };
+
     case "CLEAR_CART":
+      // Consistent with the new logic, but returns an object to match the state structure {items: []}
       return { items: [] };
+      
     default:
       return state;
   }
 }
 
 export function CartProvider({ children }) {
-  // Pass our lazy initializer function to useReducer
   const [state, dispatch] = useReducer(cartReducer, null, loadInitialState);
 
-  // This useEffect hook runs every time the cart state changes
   useEffect(() => {
     try {
-      // Convert the state object to a string and save it to localStorage
       const serializedState = JSON.stringify(state);
       localStorage.setItem('pizzaFarmhouseCart', serializedState);
     } catch (err) {
       console.error("Could not save cart to localStorage", err);
     }
-  }, [state]); // The dependency array ensures this runs only when state changes
+  }, [state]);
 
   return (
     <CartContext.Provider value={{ cart: state.items, dispatch }}>

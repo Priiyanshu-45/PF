@@ -1,78 +1,88 @@
-// src/context/AuthContext.js
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db } from '../firebase';
-import { doc, getDoc } from 'firebase/firestore';
-import toast from 'react-hot-toast'; // Import toast for error handling
+import { onAuthStateChanged } from 'firebase/auth';
+import { doc, onSnapshot } from 'firebase/firestore';
+import toast from 'react-hot-toast';
 
 const AuthContext = createContext();
 
-export function useAuth() {
+export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-}
+};
 
-export function AuthProvider({ children }) {
+export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [isGuest, setIsGuest] = useState(true);
-  const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      // --- THIS ENTIRE BLOCK IS NOW ERROR-PROOF ---
-      try {
-        if (user) {
-          setCurrentUser(user);
-          setIsGuest(false);
+    // This listener handles all authentication changes
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
 
-          const idTokenResult = await user.getIdTokenResult(true);
-          setIsAdmin(idTokenResult.claims.admin === true);
-          
-          const userDocRef = doc(db, 'users', user.uid);
-          const docSnap = await getDoc(userDocRef);
-          setUserProfile(docSnap.exists() ? docSnap.data() : null);
-
-        } else {
-          setCurrentUser(null);
-          setIsGuest(true);
-          setUserProfile(null);
-          setIsAdmin(false);
-        }
-      } catch (error) {
-        // If any error occurs (network, permissions, etc.), we catch it here.
-        console.error("Authentication Error:", error);
-        toast.error("Could not verify user. Please try again.");
-        // Reset to a safe, logged-out state.
-        setCurrentUser(null);
-        setIsGuest(true);
+      if (user) {
+        // If a user is logged in, set up a REAL-TIME listener for their profile
+        const userDocRef = doc(db, 'users', user.uid);
+        
+        const unsubscribeProfile = onSnapshot(userDocRef, (docSnapshot) => {
+          if (docSnapshot.exists()) {
+            // User profile exists, update the state
+            const userData = docSnapshot.data();
+            setUserProfile(userData);
+            // Check for admin role
+            const adminEmails = ['admin@pizzafarmhouse.com', 'admin@pizza.com'];
+            setIsAdmin(adminEmails.includes(userData.email || ''));
+          } else {
+            // This case occurs briefly for a new user before their profile is created in the LoginPopup
+            setUserProfile(null);
+          }
+          setLoading(false);
+        }, (error) => {
+            console.error("Error listening to user profile:", error);
+            setUserProfile(null);
+            setLoading(false);
+        });
+        
+        return () => unsubscribeProfile(); // Cleanup the profile listener when auth state changes
+      } else {
+        // User is logged out, clear all related state
+        setUserProfile(null);
         setIsAdmin(false);
-      } finally {
-        // --- THIS IS THE GUARANTEE ---
-        // This line will ALWAYS run, whether the try block succeeds or fails.
-        // This ensures the app can never get stuck in a loading state.
-        setAuthLoading(false);
+        setLoading(false);
       }
     });
 
-    return unsubscribe;
+    return () => unsubscribeAuth(); // Cleanup the auth listener on component unmount
   }, []);
+
+  const signOutUser = async () => {
+    try {
+      await auth.signOut();
+      // State will be automatically cleared by the onAuthStateChanged listener above
+      toast.success("You've been signed out.");
+    } catch (error) {
+      console.error('Error signing out:', error);
+      toast.error("Failed to sign out.");
+    }
+  };
 
   const value = {
     currentUser,
     userProfile,
+    loading,
     isAdmin,
-    isGuest,
-    loading: authLoading,
+    isGuest: !currentUser, // A derived value is cleaner than managing a separate state
+    signOutUser
   };
 
   return (
     <AuthContext.Provider value={value}>
-      {!authLoading && children}
+      {!loading && children}
     </AuthContext.Provider>
   );
-}
+};

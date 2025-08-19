@@ -1,13 +1,86 @@
 /* Import the Poppins font from Google Fonts */
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Apply the theme's base styles to the entire app */
+/* Dark mode only - remove light mode */
 @layer base {
+  * {
+    border-color: #374151;
+  }
+  
   body {
-    @apply bg-background text-secondary font-sans;
+    @apply bg-gray-900 text-gray-100 font-sans antialiased;
+    overflow-x: hidden;
+  }
+  
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Dark mode components */
+@layer components {
+  .btn-primary {
+    @apply bg-orange-500 text-white hover:bg-orange-600 border-orange-500 hover:border-orange-600 transition-all duration-200;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-800 text-gray-200 hover:bg-gray-700 border-gray-700 hover:border-gray-600 transition-all duration-200;
+  }
+  
+  .card-dark {
+    @apply bg-gray-800 border-gray-700 text-gray-100;
+  }
+  
+  .input-dark {
+    @apply bg-gray-800 border-gray-600 text-gray-100 placeholder-gray-400 focus:border-orange-500 focus:ring-orange-500;
+  }
+  
+  .modal-dark {
+    @apply bg-gray-800 border-gray-700;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-800;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-600 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-500;
+}
+
+/* Hide scrollbar for category navigation */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Loading animations */
+.loading-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: .5;
   }
 }

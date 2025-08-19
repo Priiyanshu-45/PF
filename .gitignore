@@ -1,33 +1,46 @@
 # ----------------------------------------------------
 # React / Node.js standard ignores
 # ----------------------------------------------------
+# Dependencies
 node_modules/
 .pnp/
 .pnp.js
 .pnp.cjs
 .pnp.data.json
 
-# Build output
+# Build & compilation output
 build/
 dist/
+out/
 tmp/
 temp/
+
+# Test snapshots
+*.snap
 
 # Coverage reports
 coverage/
 
+# ----------------------------------------------------
 # Logs
+# ----------------------------------------------------
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+firebase-debug.log
 
+# ----------------------------------------------------
 # Runtime data
+# ----------------------------------------------------
 *.pid
 *.seed
 *.pid.lock
 
-# Environment variables
+# ----------------------------------------------------
+# Environment & Configuration
+# ----------------------------------------------------
+# Environment variables - Do not commit secrets
 .env
 .env.local
 .env.development.local
@@ -50,6 +63,12 @@ pnpm-debug.log*
 *.sublime-workspace
 
 # ----------------------------------------------------
+# Platform & Hosting
+# ----------------------------------------------------
+# Firebase
+.firebase/
+
+# ----------------------------------------------------
 # OS-specific files
 # ----------------------------------------------------
 # macOS
@@ -66,29 +85,18 @@ Desktop.ini
 *~
 
 # ----------------------------------------------------
-# Optional: Test snapshots
+# Misc build caches & tool configs
 # ----------------------------------------------------
-*.snap
-
-# ----------------------------------------------------
-# Optional: Misc tool configs
-# ----------------------------------------------------
-# ESLint cache
+# ESLint / Stylelint
 .eslintcache
-
-# Stylelint cache
 .stylelintcache
 
-# Parcel-bundler cache
+# Bundler caches
 .cache/
 .parcel-cache/
-
-# Next.js / Gatsby / Remix etc. build caches
 .next/
-out/
-.cache/
 
-# Storybook build outputs
+# Storybook
 storybook-static/
 
 # ----------------------------------------------------

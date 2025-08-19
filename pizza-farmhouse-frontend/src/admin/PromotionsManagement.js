@@ -1,113 +1,231 @@
-// src/admin/PromotionsManagement.js
 import React, { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { FiBell, FiSave, FiToggleLeft, FiToggleRight } from 'react-icons/fi';
 import { db } from '../firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, updateDoc, onSnapshot } from 'firebase/firestore';
 import toast from 'react-hot-toast';
-import { FiToggleLeft, FiToggleRight, FiLoader, FiBell, FiPower } from 'react-icons/fi';
-
-const Button = ({ isLoading, disabled, children, ...props }) => (
-    <button {...props} disabled={isLoading || disabled} className="w-full flex justify-center bg-primary text-white font-bold py-3 px-4 rounded-lg hover:bg-orange-600 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed">
-        {isLoading ? <FiLoader className="animate-spin" size={24} /> : children}
-    </button>
-);
 
 export default function PromotionsManagement() {
-    // CHANGED: State now manages a single promotion object
-    const [promotion, setPromotion] = useState({ title: '', description: '', enabled: true });
-    const [storeStatus, setStoreStatus] = useState({ open: true, message: '' });
-    const [isLoading, setIsLoading] = useState(false);
-    const [isFetching, setIsFetching] = useState(true);
-
-    useEffect(() => {
-        const fetchPromo = async () => {
-            setIsFetching(true);
-            const docRef = doc(db, 'promotions', 'main');
-            const docSnap = await getDoc(docRef);
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                // CHANGED: Set a single promotion object, with a fallback
-                setPromotion(data.promotion || { title: '', description: '', enabled: true });
-                setStoreStatus(data.storeStatus || { open: true, message: '' });
-            }
-            setIsFetching(false);
-        };
-        fetchPromo();
-    }, []);
-
-    // CHANGED: Simplified handler for the single promotion object
-    const handlePromoChange = (field, value) => {
-        setPromotion(prev => ({ ...prev, [field]: value }));
-    };
-
-    // REMOVED: addPromoInput and removePromoInput are no longer needed
-
-    const handleSaveChanges = async () => {
-        setIsLoading(true);
-        try {
-            // CHANGED: Save the single promotion object
-            await setDoc(doc(db, 'promotions', 'main'), { promotion, storeStatus });
-            toast.success('Promotions and store status updated!');
-        } catch (error) {
-            console.error("Promotion save error:", error);
-            toast.error("Failed to save changes.");
-        } finally {
-            setIsLoading(false);
-        }
-    };
-    
-    if (isFetching) {
-        return <div className="flex justify-center items-center h-64"><FiLoader className="animate-spin text-primary" size={32} /></div>;
+  const [promotionData, setPromotionData] = useState({
+    promotion: {
+      enabled: false,
+      title: '',
+      description: ''
+    },
+    storeStatus: {
+      open: true,
+      message: ''
     }
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    const unsubscribe = onSnapshot(doc(db, "promotions", "main"), (doc) => {
+      if (doc.exists()) {
+        const data = doc.data();
+        setPromotionData(data);
+      }
+      setLoading(false);
+    }, (error) => {
+      console.error("Error fetching promotions:", error);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await updateDoc(doc(db, "promotions", "main"), promotionData);
+      toast.success('Settings saved successfully!');
+    } catch (error) {
+      console.error('Error saving promotions:', error);
+      toast.error('Failed to save settings');
+    }
+    setSaving(false);
+  };
+
+  const togglePromotion = () => {
+    setPromotionData(prev => ({
+      ...prev,
+      promotion: {
+        ...prev.promotion,
+        enabled: !prev.promotion.enabled
+      }
+    }));
+  };
+
+  const toggleStore = () => {
+    setPromotionData(prev => ({
+      ...prev,
+      storeStatus: {
+        ...prev.storeStatus,
+        open: !prev.storeStatus.open
+      }
+    }));
+  };
+
+  if (loading) {
     return (
-        <div>
-            <h1 className="text-3xl font-bold text-secondary mb-6">Promotions & Store Status</h1>
-            <div className="space-y-8">
-                <div className="bg-white p-6 rounded-xl shadow-lg">
-                    <div className="flex items-center gap-3 mb-2"><FiPower size={24} className="text-secondary" /><h2 className="text-xl font-bold">Store Status</h2></div>
-                    <p className="text-sm text-gray-500 mb-4">Temporarily close the store and display a pop-up to all customers.</p>
-                    <div className="flex items-center gap-4 mb-4">
-                        <p className="font-medium">Store is currently:</p>
-                        <button onClick={() => setStoreStatus(prev => ({...prev, open: !prev.open}))} className={`font-semibold px-4 py-1 rounded-full ${storeStatus.open ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{storeStatus.open ? "OPEN" : "CLOSED"}</button>
-                    </div>
-                    {!storeStatus.open && (
-                        <input value={storeStatus.message} onChange={(e) => setStoreStatus(prev => ({...prev, message: e.target.value}))} placeholder="e.g., We are closed for Diwali." className="w-full p-2 border rounded-md"/>
-                    )}
-                </div>
-                 <div className="bg-white p-6 rounded-xl shadow-lg">
-                    <div className="flex items-center gap-3 mb-2"><FiBell size={24} className="text-secondary" /><h2 className="text-xl font-bold">Promotional Pop-up</h2></div>
-                    <p className="text-sm text-gray-500 mb-4">Create a special offer pop-up to show customers when they visit.</p>
-                    <div className="space-y-4">
-                        {/* CHANGED: Replaced map with static inputs for one promotion */}
-                        <div className="flex items-center gap-2">
-                             <p className="font-medium w-24">Enabled:</p>
-                             <button onClick={() => handlePromoChange('enabled', !promotion.enabled)} className={`p-2 rounded-full ${promotion.enabled ? 'text-green-500' : 'text-gray-400'}`}>{promotion.enabled ? <FiToggleRight size={32}/> : <FiToggleLeft size={32}/>}</button>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Offer Title</label>
-                            <input 
-                                type="text" 
-                                value={promotion.title} 
-                                onChange={(e) => handlePromoChange('title', e.target.value)} 
-                                placeholder="e.g., 20% OFF on all pizzas!" 
-                                className="w-full p-2 border rounded-md"
-                            />
-                        </div>
-                        <div>
-                             <label className="block text-sm font-medium text-gray-700 mb-1">Description (Optional)</label>
-                             <textarea 
-                                value={promotion.description} 
-                                onChange={(e) => handlePromoChange('description', e.target.value)} 
-                                placeholder="e.g., Use code PIZZA20. Valid for a limited time." 
-                                className="w-full p-2 border rounded-md"
-                                rows="3"
-                             />
-                        </div>
-                        {/* REMOVED: "Add Offer" button */}
-                    </div>
-                </div>
-                <Button onClick={handleSaveChanges} isLoading={isLoading}>Save All Changes</Button>
-            </div>
-        </div>
+      <div className="bg-gray-900 min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
+        <span className="ml-2 text-gray-300">Loading promotions...</span>
+      </div>
     );
-};
+  }
+
+  return (
+    <div className="bg-gray-900 min-h-screen p-6">
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div className="flex justify-between items-center">
+          <h2 className="text-2xl font-bold text-gray-200">Promotions & Store Settings</h2>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-6 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 transition-colors"
+          >
+            <FiSave size={16} className="inline mr-2" />
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+
+        {/* Store Status */}
+        <div className="bg-gray-800 border border-gray-700 rounded-lg p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold text-gray-200 flex items-center">
+              🏪 Store Status
+            </h3>
+            <button
+              onClick={toggleStore}
+              className="flex items-center space-x-2"
+            >
+              {promotionData.storeStatus.open ? (
+                <FiToggleRight size={32} className="text-green-500" />
+              ) : (
+                <FiToggleLeft size={32} className="text-red-500" />
+              )}
+              <span className={`font-medium ${
+                promotionData.storeStatus.open ? 'text-green-400' : 'text-red-400'
+              }`}>
+                {promotionData.storeStatus.open ? 'Open' : 'Closed'}
+              </span>
+            </button>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Store Closed Message (optional)
+            </label>
+            <textarea
+              value={promotionData.storeStatus.message || ''}
+              onChange={(e) => setPromotionData(prev => ({
+                ...prev,
+                storeStatus: {
+                  ...prev.storeStatus,
+                  message: e.target.value
+                }
+              }))}
+              rows={3}
+              className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-gray-200 placeholder-gray-400 focus:border-orange-500 focus:ring-orange-500"
+              placeholder="Enter message to show when store is closed..."
+            />
+          </div>
+        </div>
+
+        {/* Promotion Settings */}
+        <div className="bg-gray-800 border border-gray-700 rounded-lg p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-bold text-gray-200 flex items-center">
+              <FiBell size={20} className="mr-2" />
+              Promotional Banner
+            </h3>
+            <button
+              onClick={togglePromotion}
+              className="flex items-center space-x-2"
+            >
+              {promotionData.promotion.enabled ? (
+                <FiToggleRight size={32} className="text-green-500" />
+              ) : (
+                <FiToggleLeft size={32} className="text-gray-500" />
+              )}
+              <span className={`font-medium ${
+                promotionData.promotion.enabled ? 'text-green-400' : 'text-gray-400'
+              }`}>
+                {promotionData.promotion.enabled ? 'Active' : 'Inactive'}
+              </span>
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Promotion Title *
+              </label>
+              <input
+                type="text"
+                value={promotionData.promotion.title || ''}
+                onChange={(e) => setPromotionData(prev => ({
+                  ...prev,
+                  promotion: {
+                    ...prev.promotion,
+                    title: e.target.value
+                  }
+                }))}
+                className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-gray-200 placeholder-gray-400 focus:border-orange-500 focus:ring-orange-500"
+                placeholder="Enter promotion title..."
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Promotion Description (optional)
+              </label>
+              <textarea
+                value={promotionData.promotion.description || ''}
+                onChange={(e) => setPromotionData(prev => ({
+                  ...prev,
+                  promotion: {
+                    ...prev.promotion,
+                    description: e.target.value
+                  }
+                }))}
+                rows={3}
+                className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-gray-200 placeholder-gray-400 focus:border-orange-500 focus:ring-orange-500"
+                placeholder="Enter promotion description..."
+              />
+            </div>
+          </div>
+
+          {/* Preview */}
+          {promotionData.promotion.enabled && promotionData.promotion.title && (
+            <div className="mt-6 p-4 bg-gradient-to-r from-orange-600 to-red-600 text-white rounded-lg">
+              <div className="flex items-center justify-center text-sm">
+                <FiBell className="mr-2 text-base" />
+                <span className="font-medium">{promotionData.promotion.title}</span>
+                {promotionData.promotion.description && (
+                  <span className="ml-2 text-xs opacity-90 hidden sm:inline">
+                    - {promotionData.promotion.description}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Instructions */}
+        <div className="bg-blue-900/20 border border-blue-700/50 rounded-lg p-4">
+          <h4 className="font-medium text-blue-400 mb-2">How it works:</h4>
+          <ul className="text-sm text-gray-300 space-y-1">
+            <li>• Toggle "Active" to enable/disable the promotional banner</li>
+            <li>• When active, the banner shows as a popup to new visitors</li>
+            <li>• After users close the popup, it moves to the header</li>
+            <li>• Changes are applied instantly to all users</li>
+            <li>• When store is closed, customers cannot place orders</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}

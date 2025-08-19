@@ -1,304 +1,572 @@
-// src/admin/MenuManagement.js
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { FiPlus, FiEdit, FiTrash2, FiUpload, FiSave, FiX, FiImage } from 'react-icons/fi';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, orderBy, doc, updateDoc, addDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, deleteDoc, addDoc, orderBy, query } from 'firebase/firestore';
 import toast from 'react-hot-toast';
-import { FiLoader, FiPlus, FiTrash2, FiToggleLeft, FiToggleRight, FiX, FiUploadCloud, FiCrop, FiEdit } from 'react-icons/fi';
-import { useDropzone } from 'react-dropzone';
-import ReactCrop, { centerCrop, makeAspectCrop } from 'react-image-crop';
-import 'react-image-crop/dist/ReactCrop.css';
 
-const Input = (props) => (
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">{props.label}</label>
-      <input {...props} className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"/>
-    </div>
-);
-const Button = ({ isLoading, disabled, children, ...props }) => (
-    <button {...props} disabled={isLoading || disabled} className="w-full flex justify-center bg-primary text-white font-bold py-3 px-4 rounded-lg hover:bg-orange-600 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed">
-      {isLoading ? <FiLoader className="animate-spin" size={24} /> : children}
-    </button>
-);
-const ConfirmModal = ({ isOpen, message, onConfirm, onCancel }) => {
-    if (!isOpen) return null;
-    return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
-            <div className="bg-white p-6 rounded-lg shadow-xl">
-                <p className="text-lg mb-4">{message}</p>
-                <div className="flex justify-end gap-4">
-                    <button onClick={onCancel} className="px-4 py-2 bg-gray-200 rounded-lg">Cancel</button>
-                    <button onClick={onConfirm} className="px-4 py-2 bg-red-500 text-white rounded-lg">Confirm</button>
-                </div>
+// Cloudinary configuration
+const cloudinaryConfig = {
+  cloudName: process.env.REACT_APP_CLOUDINARY_CLOUD_NAME || 'your-cloud-name',
+  uploadPreset: process.env.REACT_APP_CLOUDINARY_UPLOAD_PRESET || 'pizza_farmhouse'
+};
+
+// Cloudinary upload function
+const uploadToCloudinary = async (file) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('upload_preset', cloudinaryConfig.uploadPreset);
+
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${cloudinaryConfig.cloudName}/image/upload`,
+    {
+      method: 'POST',
+      body: formData,
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('Failed to upload image');
+  }
+
+  return response.json();
+};
+
+// Cloudinary delete function
+const deleteFromCloudinary = async (imageUrl) => {
+  try {
+    // Extract public_id from Cloudinary URL
+    const parts = imageUrl.split('/');
+    const filename = parts[parts.length - 1];
+    const publicId = filename.split('.')[0];
+
+    // Call your backend to delete (you'll need to implement this endpoint)
+    const response = await fetch('http://localhost:4000/api/delete-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ publicId })
+    });
+
+    if (response.ok) {
+      console.log('Image deleted from Cloudinary');
+    }
+  } catch (error) {
+    console.error('Error deleting from Cloudinary:', error);
+  }
+};
+
+const MenuItemForm = ({ item = null, categoryId, onSave, onCancel }) => {
+  const [formData, setFormData] = useState({
+    name: item?.name || '',
+    description: item?.description || '',
+    price: item?.price || '',
+    image: item?.image || '',
+    available: item?.available !== false,
+    sizes: item?.sizes || {}
+  });
+  const [imageFile, setImageFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [hasSizes, setHasSizes] = useState(!!item?.sizes && Object.keys(item.sizes).length > 0);
+  const [sizeEntries, setSizeEntries] = useState(
+    item?.sizes ? Object.entries(item.sizes) : [['Small', ''], ['Medium', ''], ['Large', '']]
+  );
+
+  const handleImageUpload = async (file) => {
+    setUploading(true);
+    try {
+      const result = await uploadToCloudinary(file);
+      setFormData(prev => ({ ...prev, image: result.secure_url }));
+      toast.success('Image uploaded successfully!');
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      toast.error('Failed to upload image');
+    }
+    setUploading(false);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!formData.name.trim()) {
+      toast.error('Please enter item name');
+      return;
+    }
+    
+    if (!hasSizes && !formData.price) {
+      toast.error('Please enter price');
+      return;
+    }
+
+    let finalSizes = {};
+    if (hasSizes) {
+      sizeEntries.forEach(([size, price]) => {
+        if (size.trim() && price) {
+          finalSizes[size.trim()] = parseInt(price);
+        }
+      });
+      
+      if (Object.keys(finalSizes).length === 0) {
+        toast.error('Please add at least one size with price');
+        return;
+      }
+    }
+
+    const itemData = {
+      ...formData,
+      price: hasSizes ? 0 : parseInt(formData.price),
+      sizes: hasSizes ? finalSizes : null,
+      available: formData.available
+    };
+
+    // If we're updating and the image changed, delete the old image
+    if (item && item.image && item.image !== formData.image) {
+      await deleteFromCloudinary(item.image);
+    }
+
+    onSave(itemData, item?.id);
+  };
+
+  const addSizeEntry = () => {
+    setSizeEntries([...sizeEntries, ['', '']]);
+  };
+
+  const removeSizeEntry = (index) => {
+    setSizeEntries(sizeEntries.filter((_, i) => i !== index));
+  };
+
+  const updateSizeEntry = (index, field, value) => {
+    const newEntries = [...sizeEntries];
+    newEntries[index][field === 'size' ? 0 : 1] = value;
+    setSizeEntries(newEntries);
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-gray-800 border border-gray-600 rounded-lg p-6 mb-6"
+    >
+      <h3 className="text-lg font-bold text-gray-200 mb-4">
+        {item ? 'Edit Menu Item' : 'Add New Menu Item'}
+      </h3>
+      
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Item Name *
+            </label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+              className="w-full p-3 border border-gray-600 rounded-lg bg-gray-700 text-gray-200 placeholder-gray-400 focus:border-orange-500 focus:ring-orange-500"
+              placeholder="Enter item name"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Image
+            </label>
+            <div className="flex space-x-2">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files[0];
+                  if (file) {
+                    setImageFile(file);
+                    handleImageUpload(file);
+                  }
+                }}
+                className="hidden"
+                id="imageUpload"
+              />
+              <label
+                htmlFor="imageUpload"
+                className="flex-1 flex items-center justify-center p-3 border border-gray-600 rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 cursor-pointer transition-colors"
+              >
+                {uploading ? (
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-orange-500 mr-2"></div>
+                ) : (
+                  <FiUpload size={16} className="mr-2" />
+                )}
+                {uploading ? 'Uploading...' : 'Upload Image'}
+              </label>
             </div>
+            {formData.image && (
+              <div className="mt-2 w-20 h-20 rounded-lg overflow-hidden bg-gray-700">
+                <img src={formData.image} alt="Preview" className="w-full h-full object-cover" />
+              </div>
+            )}
+          </div>
         </div>
-    );
+
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            Description
+          </label>
+          <textarea
+            value={formData.description}
+            onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+            rows={3}
+            className="w-full p-3 border border-gray-600 rounded-lg bg-gray-700 text-gray-200 placeholder-gray-400 focus:border-orange-500 focus:ring-orange-500"
+            placeholder="Enter item description"
+          />
+        </div>
+
+        <div className="flex items-center space-x-4">
+          <label className="flex items-center">
+            <input
+              type="checkbox"
+              checked={hasSizes}
+              onChange={(e) => setHasSizes(e.target.checked)}
+              className="rounded border-gray-600 bg-gray-700 text-orange-500 focus:ring-orange-500"
+            />
+            <span className="ml-2 text-sm text-gray-300">Has multiple sizes</span>
+          </label>
+
+          <label className="flex items-center">
+            <input
+              type="checkbox"
+              checked={formData.available}
+              onChange={(e) => setFormData(prev => ({ ...prev, available: e.target.checked }))}
+              className="rounded border-gray-600 bg-gray-700 text-orange-500 focus:ring-orange-500"
+            />
+            <span className="ml-2 text-sm text-gray-300">Available</span>
+          </label>
+        </div>
+
+        {!hasSizes ? (
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Price *
+            </label>
+            <input
+              type="number"
+              value={formData.price}
+              onChange={(e) => setFormData(prev => ({ ...prev, price: e.target.value }))}
+              className="w-full p-3 border border-gray-600 rounded-lg bg-gray-700 text-gray-200 placeholder-gray-400 focus:border-orange-500 focus:ring-orange-500"
+              placeholder="Enter price"
+              required
+            />
+          </div>
+        ) : (
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Sizes & Prices
+            </label>
+            <div className="space-y-2">
+              {sizeEntries.map(([size, price], index) => (
+                <div key={index} className="flex space-x-2">
+                  <input
+                    type="text"
+                    value={size}
+                    onChange={(e) => updateSizeEntry(index, 'size', e.target.value)}
+                    placeholder="Size name"
+                    className="flex-1 p-2 border border-gray-600 rounded-lg bg-gray-700 text-gray-200 placeholder-gray-400 focus:border-orange-500 focus:ring-orange-500"
+                  />
+                  <input
+                    type="number"
+                    value={price}
+                    onChange={(e) => updateSizeEntry(index, 'price', e.target.value)}
+                    placeholder="Price"
+                    className="w-24 p-2 border border-gray-600 rounded-lg bg-gray-700 text-gray-200 placeholder-gray-400 focus:border-orange-500 focus:ring-orange-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeSizeEntry(index)}
+                    className="p-2 text-red-400 hover:text-red-300 hover:bg-red-400/10 rounded-lg"
+                  >
+                    <FiTrash2 size={16} />
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={addSizeEntry}
+                className="w-full p-2 border-2 border-dashed border-gray-600 rounded-lg text-gray-400 hover:border-gray-500 hover:text-gray-300 transition-colors"
+              >
+                + Add Size
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="flex space-x-3 pt-4">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 px-4 py-2 border border-gray-600 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={uploading}
+            className="flex-1 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50 transition-colors"
+          >
+            <FiSave size={16} className="inline mr-2" />
+            {item ? 'Update Item' : 'Add Item'}
+          </button>
+        </div>
+      </form>
+    </motion.div>
+  );
+};
+
+const CategorySection = ({ category, onAddItem, onEditItem, onDeleteItem }) => {
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  return (
+    <div className="bg-gray-800 border border-gray-600 rounded-lg mb-6">
+      <div 
+        className="p-4 cursor-pointer hover:bg-gray-700 transition-colors"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <div className="flex justify-between items-center">
+          <h3 className="text-lg font-bold text-gray-200">{category.category}</h3>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onAddItem(category.id);
+              }}
+              className="px-3 py-1 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm"
+            >
+              <FiPlus size={14} className="inline mr-1" />
+              Add Item
+            </button>
+            <span className="text-gray-400">
+              {isExpanded ? '−' : '+'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="border-t border-gray-600"
+          >
+            {category.items && category.items.length > 0 ? (
+              <div className="p-4 space-y-3">
+                {category.items.map((item, index) => (
+                  <div
+                    key={index}
+                    className="bg-gray-700 border border-gray-600 rounded-lg p-4 flex items-center space-x-4"
+                  >
+                    <div className="w-16 h-16 bg-gray-600 rounded-lg overflow-hidden flex-shrink-0">
+                      {item.image ? (
+                        <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <FiImage size={24} className="text-gray-400" />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-medium text-gray-200 truncate">{item.name}</h4>
+                      {item.description && (
+                        <p className="text-sm text-gray-400 truncate mt-1">{item.description}</p>
+                      )}
+                      <div className="flex items-center space-x-2 mt-1">
+                        {item.sizes ? (
+                          <span className="text-sm text-orange-400">
+                            {Object.entries(item.sizes).map(([size, price]) => 
+                              `${size}: ₹${price}`
+                            ).join(', ')}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-orange-400">₹{item.price}</span>
+                        )}
+                        <span className={`text-xs px-2 py-1 rounded-full ${
+                          item.available !== false 
+                            ? 'bg-green-900/30 text-green-400'
+                            : 'bg-red-900/30 text-red-400'
+                        }`}>
+                          {item.available !== false ? 'Available' : 'Unavailable'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => onEditItem(category.id, item, index)}
+                        className="p-2 text-blue-400 hover:text-blue-300 hover:bg-blue-400/10 rounded-lg transition-colors"
+                      >
+                        <FiEdit size={16} />
+                      </button>
+                      <button
+                        onClick={() => onDeleteItem(category.id, item, index)}
+                        className="p-2 text-red-400 hover:text-red-300 hover:bg-red-400/10 rounded-lg transition-colors"
+                      >
+                        <FiTrash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-8 text-center">
+                <FiImage size={48} className="mx-auto text-gray-500 mb-4" />
+                <p className="text-gray-400">No items in this category</p>
+                <button
+                  onClick={() => onAddItem(category.id)}
+                  className="mt-3 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
+                >
+                  Add First Item
+                </button>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
 };
 
 export default function MenuManagement() {
-    const [categories, setCategories] = useState([]);
-    const [newCategory, setNewCategory] = useState('');
-    const [isAddingCategory, setIsAddingCategory] = useState(false);
-    const [editingItem, setEditingItem] = useState(null);
-    const initialFormState = { name: '', description: '', category: '', images: [], available: true, price: '', sizes: {} };
-    const [form, setForm] = useState(initialFormState);
-    const [sizeInputs, setSizeInputs] = useState([{ size: '', price: '' }]);
-    const [hasSizes, setHasSizes] = useState(false);
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [imageToCrop, setImageToCrop] = useState(null);
-    const [crop, setCrop] = useState();
-    const [completedCrop, setCompletedCrop] = useState(null);
-    const imgRef = useRef(null);
-    const [isUploading, setIsUploading] = useState(false);
-    const [deleteConfirmation, setDeleteConfirmation] = useState({ isOpen: false, item: null, category: null });
+  const [menuData, setMenuData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
+  const [currentCategoryId, setCurrentCategoryId] = useState(null);
 
-    const handleChange = (e) => {
-        setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
-    };
+  useEffect(() => {
+    const q = query(collection(db, "menu"), orderBy("category"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const categories = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setMenuData(categories);
+      setLoading(false);
+    }, (error) => {
+      console.error("Error fetching menu:", error);
+      toast.error("Failed to load menu");
+      setLoading(false);
+    });
 
-    useEffect(() => {
-        const q = query(collection(db, "menu"), orderBy("category"));
-        const unsub = onSnapshot(q, (snapshot) => {
-            setCategories(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-        }, (error) => {
-            console.error("Menu snapshot error: ", error);
-            toast.error("Could not fetch menu. Check Firestore rules.");
-        });
-        return () => unsub();
-    }, []);
+    return () => unsubscribe();
+  }, []);
 
-    const resetForm = () => {
-        setEditingItem(null);
-        setForm(initialFormState);
-        setSizeInputs([{ size: '', price: '' }]);
-        setHasSizes(false);
-    };
+  const handleAddItem = (categoryId) => {
+    setCurrentCategoryId(categoryId);
+    setEditingItem(null);
+    setShowForm(true);
+  };
 
-    const handleEdit = (item, category) => {
-        setEditingItem({ ...item, categoryId: category.id, originalName: item.name });
-        setForm({
-            name: item.name,
-            description: item.description || '',
-            category: category.category,
-            images: item.images || [],
-            available: item.available !== false,
-            price: item.price || '',
-            sizes: item.sizes || {}
-        });
-        if (item.sizes && Object.keys(item.sizes).length > 0) {
-            setHasSizes(true);
-            setSizeInputs(Object.entries(item.sizes).map(([size, price]) => ({ size, price: String(price) })));
-        } else {
-            setHasSizes(false);
-            setSizeInputs([{ size: '', price: '' }]);
-        }
-        window.scrollTo(0, 0);
-    };
+  const handleEditItem = (categoryId, item, itemIndex) => {
+    setCurrentCategoryId(categoryId);
+    setEditingItem({ ...item, index: itemIndex });
+    setShowForm(true);
+  };
 
-    const onDrop = useCallback(acceptedFiles => {
-        if (form.images.length >= 3) { toast.error("Maximum of 3 images reached."); return; }
-        const reader = new FileReader();
-        reader.onload = () => setImageToCrop(reader.result);
-        reader.readAsDataURL(acceptedFiles[0]);
-    }, [form.images.length]);
+  const handleSaveItem = async (itemData, itemId = null) => {
+    try {
+      const category = menuData.find(cat => cat.id === currentCategoryId);
+      const updatedItems = [...(category.items || [])];
 
-    const { getRootProps, getInputProps } = useDropzone({ onDrop, accept: { 'image/*': [] }, maxFiles: 1 });
+      if (editingItem && editingItem.index !== undefined) {
+        // Editing existing item
+        updatedItems[editingItem.index] = itemData;
+      } else {
+        // Adding new item
+        updatedItems.push(itemData);
+      }
 
-    function onImageLoad(e) {
-        const { width, height } = e.currentTarget;
-        const crop = centerCrop(makeAspectCrop({ unit: '%', width: 90 }, 16 / 9, width, height), width, height);
-        setCrop(crop);
+      await updateDoc(doc(db, 'menu', currentCategoryId), {
+        items: updatedItems
+      });
+
+      toast.success(editingItem ? 'Item updated successfully' : 'Item added successfully');
+      setShowForm(false);
+      setEditingItem(null);
+      setCurrentCategoryId(null);
+    } catch (error) {
+      console.error('Error saving item:', error);
+      toast.error('Failed to save item');
     }
+  };
 
-    const handleCropAndUpload = async () => {
-        if (!completedCrop || !imgRef.current) return;
-        setIsUploading(true);
-        const image = imgRef.current;
-        const canvas = document.createElement('canvas');
-        const scaleX = image.naturalWidth / image.width;
-        const scaleY = image.naturalHeight / image.height;
-        canvas.width = completedCrop.width * scaleX;
-        canvas.height = completedCrop.height * scaleY;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(image, completedCrop.x * scaleX, completedCrop.y * scaleY, completedCrop.width * scaleX, completedCrop.height * scaleY, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        
-        try {
-            const response = await fetch('http://localhost:4000/api/upload', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ data: dataUrl }),
-            });
-            if (!response.ok) throw new Error('Upload failed');
-            const result = await response.json();
-            setForm(prev => ({ ...prev, images: [...prev.images, result.secure_url] }));
-            setImageToCrop(null);
-            setCompletedCrop(null);
-            toast.success("Image added!");
-        } catch (error) {
-            console.error(error);
-            toast.error("Image upload failed. Is your backend server running?");
-        } finally {
-            setIsUploading(false);
-        }
-    };
-    
-    const handleRemoveImage = (imgUrl) => setForm(prev => ({ ...prev, images: prev.images.filter(url => url !== imgUrl) }));
+  const handleDeleteItem = async (categoryId, item, itemIndex) => {
+    if (!window.confirm('Are you sure you want to delete this item?')) return;
 
-    const handleAddCategory = async () => {
-        if (newCategory.trim() === '') return toast.error("Category name can't be empty.");
-        setIsAddingCategory(true);
-        try {
-            await addDoc(collection(db, 'menu'), { category: newCategory.trim(), items: [] });
-            toast.success(`Category "${newCategory.trim()}" added!`);
-            setNewCategory('');
-        } catch (error) { toast.error("Failed to add category."); }
-        finally { setIsAddingCategory(false); }
-    };
+    try {
+      // Delete image from Cloudinary if exists
+      if (item.image) {
+        await deleteFromCloudinary(item.image);
+      }
 
-    const handleToggleAvailability = async (item, category) => {
-        const categoryRef = doc(db, 'menu', category.id);
-        const updatedItems = category.items.map(i => i.name === item.name ? { ...i, available: i.available === false ? true : false } : i);
-        try {
-            await updateDoc(categoryRef, { items: updatedItems });
-            toast.success(`${item.name} is now ${item.available === false ? "available" : "unavailable"}`);
-        } catch { toast.error("Failed to update status."); }
-    };
+      const category = menuData.find(cat => cat.id === categoryId);
+      const updatedItems = category.items.filter((_, index) => index !== itemIndex);
 
-    const handleDeleteItem = async () => {
-        const { item, category } = deleteConfirmation;
-        if (!item || !category) return;
-        const categoryRef = doc(db, 'menu', category.id);
-        const updatedItems = category.items.filter(i => i.name !== item.name);
-        try {
-            await updateDoc(categoryRef, { items: updatedItems });
-            toast.success(`${item.name} deleted.`);
-        } catch { toast.error("Failed to delete item."); }
-        finally {
-            setDeleteConfirmation({ isOpen: false, item: null, category: null });
-        }
-    };
-    
-    const handleAddOrUpdateItem = async (e) => {
-        e.preventDefault();
-        if (!form.category) return toast.error("Please select a category.");
-        if (!hasSizes && !form.price) return toast.error("Please add a price.");
-        if (hasSizes && sizeInputs.every(s => !s.size || !s.price)) return toast.error("Please add at least one valid size and price.");
-        
-        setIsSubmitting(true);
-        const targetCategoryDoc = categories.find(c => c.category === form.category);
-        if (!targetCategoryDoc) {
-            toast.error("Category not found!");
-            setIsSubmitting(false);
-            return;
-        }
+      await updateDoc(doc(db, 'menu', categoryId), {
+        items: updatedItems
+      });
 
-        const categoryRef = doc(db, 'menu', targetCategoryDoc.id);
-        const newItemData = {
-            name: form.name, description: form.description, images: form.images, available: form.available !== false,
-            ...(hasSizes ? { sizes: sizeInputs.reduce((acc, curr) => { if (curr.size && curr.price) acc[curr.size.trim()] = Number(curr.price); return acc; }, {}) } : { price: Number(form.price) })
-        };
+      toast.success('Item deleted successfully');
+    } catch (error) {
+      console.error('Error deleting item:', error);
+      toast.error('Failed to delete item');
+    }
+  };
 
-        try {
-            let updatedItems;
-            if (editingItem) {
-                updatedItems = targetCategoryDoc.items.map(i => i.name === editingItem.originalName ? newItemData : i);
-            } else {
-                updatedItems = [...(targetCategoryDoc.items || []), newItemData];
-            }
-            await updateDoc(categoryRef, { items: updatedItems });
-            toast.success(editingItem ? "Item updated!" : "Item added!");
-            resetForm();
-        } catch (error) { console.error(error); toast.error("Failed to update menu."); }
-        finally { setIsSubmitting(false); }
-    };
-    
+  const handleCancel = () => {
+    setShowForm(false);
+    setEditingItem(null);
+    setCurrentCategoryId(null);
+  };
+
+  if (loading) {
     return (
-        <div>
-            <ConfirmModal 
-                isOpen={deleteConfirmation.isOpen}
-                message={`Are you sure you want to delete ${deleteConfirmation.item?.name}?`}
-                onConfirm={handleDeleteItem}
-                onCancel={() => setDeleteConfirmation({ isOpen: false, item: null, category: null })}
-            />
-            <h1 className="text-3xl font-bold text-secondary mb-6">Menu Editor</h1>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-1 bg-white p-6 rounded-xl shadow-lg h-fit sticky top-8">
-                    <h2 className="text-2xl font-bold mb-4">{editingItem ? "Edit Item" : "Add New Item"}</h2>
-                    <form onSubmit={handleAddOrUpdateItem} className="space-y-4">
-                        <Input label="Item Name" placeholder="e.g., Margherita Pizza" name="name" value={form.name} onChange={handleChange} required />
-                        <textarea placeholder="Description (Optional)" rows={3} value={form.description} name="description" onChange={handleChange} className="w-full p-2 border rounded" />
-                        <select name="category" value={form.category} onChange={handleChange} className="w-full p-2 border rounded" required>
-                            <option value="">Select a Category</option>
-                            {categories.map(c => <option key={c.id} value={c.category}>{c.category}</option>)}
-                        </select>
-                        <div {...getRootProps()} className="p-6 border-2 border-dashed rounded-lg text-center cursor-pointer hover:bg-gray-50"><input {...getInputProps()} /><FiUploadCloud className="mx-auto text-gray-400" size={30} /><p className="text-xs text-gray-500">Drop files or click to upload</p></div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                            {form.images.map(url => (
-                                <div key={url} className="relative w-20 h-20"><img src={url} alt="preview" className="w-full h-full object-cover rounded" /><button type="button" onClick={() => handleRemoveImage(url)} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"><FiX size={12}/></button></div>
-                            ))}
-                        </div>
-                        <div className="flex items-center justify-between">
-                            <label className="text-gray-700 font-medium">Has multiple sizes?</label>
-                            <button type="button" onClick={() => setHasSizes(!hasSizes)} className={`p-1 rounded-full ${hasSizes ? 'text-green-500' : 'text-red-500'}`}>{hasSizes ? <FiToggleRight size={24}/> : <FiToggleLeft size={24}/>}</button>
-                        </div>
-                        {hasSizes ? (
-                            <div className="space-y-2 border-t pt-4">
-                                {sizeInputs.map((input, index) => (
-                                    <div key={index} className="flex gap-2 items-center">
-                                        <input placeholder="Size (e.g., Small)" value={input.size} onChange={(e) => { const newSizes = [...sizeInputs]; newSizes[index].size = e.target.value; setSizeInputs(newSizes); }} className="w-1/2 p-2 border rounded"/>
-                                        <input placeholder="Price" type="number" value={input.price} onChange={(e) => { const newSizes = [...sizeInputs]; newSizes[index].price = e.target.value; setSizeInputs(newSizes); }} className="w-1/2 p-2 border rounded"/>
-                                    </div>
-                                ))}
-                                <button type="button" onClick={() => setSizeInputs([...sizeInputs, { size: '', price: '' }])} className="text-sm text-primary font-semibold">+ Add Size</button>
-                            </div>
-                        ) : (
-                             <Input label="Price" placeholder="e.g., 250" name="price" type="number" value={form.price} onChange={handleChange} />
-                        )}
-                        <Button type="submit" isLoading={isSubmitting}>{editingItem ? "Update Item" : "Add Item"}</Button>
-                        {editingItem && <button type="button" onClick={resetForm} className="w-full text-center mt-2 text-sm text-gray-500 hover:text-primary">Cancel Edit</button>}
-                    </form>
-                </div>
-                <div className="lg:col-span-2 space-y-6">
-                     <div className="bg-white p-6 rounded-xl shadow-lg">
-                        <h2 className="text-2xl font-bold mb-4">Manage Categories</h2>
-                        <div className="flex gap-2">
-                            <input value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="New Category Name" className="flex-grow p-2 border rounded"/>
-                            <button type="button" onClick={handleAddCategory} disabled={isAddingCategory} className="bg-gray-200 text-gray-700 p-3 rounded-lg hover:bg-gray-300">{isAddingCategory ? <FiLoader className="animate-spin"/> : <FiPlus />}</button>
-                        </div>
-                    </div>
-                    {categories.map(cat => (
-                        <div key={cat.id} className="bg-white p-6 rounded-xl shadow-lg">
-                            <h3 className="font-semibold text-xl border-b pb-2 mb-4">{cat.category}</h3>
-                            <div className="space-y-2">
-                                {(cat.items || []).map(item => (
-                                    <div key={item.name} className="flex justify-between items-center p-2 bg-gray-50 rounded-lg">
-                                        <div className="flex items-center"><img src={item.images?.[0] || 'https://placehold.co/50x50/F97316/FFF?text=P'} alt={item.name} className="w-10 h-10 rounded-md object-cover mr-3"/><span>{item.name}</span></div>
-                                        <div className="flex items-center gap-3">
-                                            <button onClick={() => handleToggleAvailability(item, cat)} className={`p-1 rounded-full ${item.available !== false ? 'text-green-500' : 'text-gray-400'}`}>{item.available !== false ? <FiToggleRight size={20}/> : <FiToggleLeft size={20} />}</button>
-                                            <button onClick={() => handleEdit(item, cat)} className="p-1 text-yellow-500 hover:text-yellow-700"><FiEdit size={16}/></button>
-                                            <button onClick={() => setDeleteConfirmation({ isOpen: true, item, category: cat })} className="p-1 text-red-500 hover:text-red-700"><FiTrash2 size={16}/></button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-            {imageToCrop && (
-                <div className="fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white p-4 rounded-lg max-w-2xl w-full">
-                        <h3 className="font-bold text-lg mb-4">Crop Image</h3>
-                        <ReactCrop crop={crop} onChange={c => setCrop(c)} onComplete={c => setCompletedCrop(c)} aspect={16 / 9}>
-                            <img ref={imgRef} src={imageToCrop} onLoad={onImageLoad} alt="Crop preview" style={{ maxHeight: '70vh' }}/>
-                        </ReactCrop>
-                        <div className="flex justify-end gap-4 mt-4">
-                            <button onClick={() => setImageToCrop(null)} className="px-4 py-2 bg-gray-200 rounded-lg">Cancel</button>
-                            <button onClick={handleCropAndUpload} disabled={isUploading} className="px-4 py-2 bg-primary text-white rounded-lg flex items-center gap-2">{isUploading ? <FiLoader className="animate-spin"/> : <FiCrop />} Crop & Add</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
+      <div className="bg-gray-900 min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
+        <span className="ml-2 text-gray-300">Loading menu...</span>
+      </div>
     );
-};
+  }
+
+  return (
+    <div className="bg-gray-900 min-h-screen p-6">
+      <div className="max-w-6xl mx-auto">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-2xl font-bold text-gray-200">Menu Management</h2>
+        </div>
+
+        {showForm && (
+          <MenuItemForm
+            item={editingItem}
+            categoryId={currentCategoryId}
+            onSave={handleSaveItem}
+            onCancel={handleCancel}
+          />
+        )}
+
+        <div className="space-y-6">
+          {menuData.map(category => (
+            <CategorySection
+              key={category.id}
+              category={category}
+              onAddItem={handleAddItem}
+              onEditItem={handleEditItem}
+              onDeleteItem={handleDeleteItem}
+            />
+          ))}
+        </div>
+
+        {menuData.length === 0 && (
+          <div className="text-center py-12">
+            <div className="text-6xl mb-4">🍕</div>
+            <h3 className="text-lg font-medium text-gray-300 mb-2">No menu categories found</h3>
+            <p className="text-gray-400">Create categories in your Firestore database first</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

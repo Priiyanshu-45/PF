@@ -2,237 +2,414 @@ import React, { useState, useEffect } from 'react';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../firebase';
-import { doc, getDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc } from 'firebase/firestore';
+import { motion } from 'framer-motion';
+import {
+  FiMapPin,
+  FiUser,
+  FiPhone,
+  FiMessageSquare,
+  FiCheckCircle,
+  FiAlertTriangle
+} from 'react-icons/fi';
 import toast from 'react-hot-toast';
-import { motion, AnimatePresence } from 'framer-motion';
-import { FiLoader, FiCheckCircle, FiMapPin, FiHome, FiCreditCard, FiDollarSign } from 'react-icons/fi';
-import StarBorder from './StarBorder';
 
-// --- Reusable UI Components ---
-const Input = (props) => (
-  <div>
-    <label htmlFor={props.name} className="block text-sm font-medium text-gray-700">{props.label}</label>
-    <input {...props} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-primary focus:border-primary"/>
-  </div>
-);
-
-const Button = ({ isLoading, disabled, children, ...props }) => (
-  <motion.button
-    whileHover={{ scale: 1.02 }}
-    whileTap={{ scale: 0.98 }}
-    {...props}
-    disabled={isLoading || disabled}
-    className="w-full flex justify-center bg-primary text-white font-bold py-3 px-4 rounded-lg hover:bg-orange-600 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-  >
-    {isLoading ? <FiLoader className="animate-spin" size={24} /> : children}
-  </motion.button>
-);
-
-const RadioCard = ({ id, value, checked, onChange, label, icon }) => (
-  <div>
-    <input type="radio" id={id} name="locationType" value={value} checked={checked} onChange={onChange} className="hidden" />
-    <motion.label
-      htmlFor={id}
-      whileTap={{ scale: 0.97 }}
-      className={`flex items-center p-4 border rounded-lg cursor-pointer transition-all ${checked ? 'bg-orange-100 border-primary ring-2 ring-primary' : 'bg-white border-gray-300 hover:border-gray-400'}`}
-    >
-      <div className="mr-4 text-primary">{icon}</div>
-      <span className="font-semibold text-secondary">{label}</span>
-    </motion.label>
-  </div>
-);
-
-// --- Main Checkout Component ---
 export default function Checkout({ onOrderPlaced }) {
   const { cart, dispatch } = useCart();
-  const { currentUser } = useAuth();
-  const [step, setStep] = useState(currentUser ? 'location' : 'details');
-  const [form, setForm] = useState({
-    name: '', phone: '', locationType: 'university', gateNumber: '',
-    address: '', instructions: '', paymentMethod: 'CashOnDelivery',
+  const { currentUser, userProfile } = useAuth();
+  const [loading, setLoading] = useState(false);
+  
+  const [orderDetails, setOrderDetails] = useState({
+    name: '',
+    address: '',
+    customMessage: '',
+    isUniversity: false,
+    universityGate: '',
+    selectedAddressIndex: null
   });
-  const [isLoading, setIsLoading] = useState(false);
-  const [userProfile, setUserProfile] = useState(null);
+  
+  const [guestPhone, setGuestPhone] = useState('');
+
+  const cartTotal = cart.reduce((sum, item) => {
+    const itemTotal = item.totalPrice || (item.price * item.qty);
+    const addonsTotal = (item.addons || []).reduce((addonSum, addon) => addonSum + addon.price, 0) * item.qty;
+    const crustTotal = item.crust ? item.crust.price * item.qty : 0;
+    return sum + itemTotal + addonsTotal + crustTotal;
+  }, 0);
 
   useEffect(() => {
-    if (currentUser) {
-      const fetchUserData = async () => {
-        const userDocRef = doc(db, 'users', currentUser.uid);
-        const docSnap = await getDoc(userDocRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setUserProfile(data);
-          setForm(prev => ({ ...prev, name: data.name || '', phone: data.phone || '' }));
-        }
-      };
-      fetchUserData();
+    // Smartly populate or clear form based on authentication state
+    if (currentUser && userProfile) {
+      // User is logged in, auto-fill their name
+      setOrderDetails(prev => ({
+        ...prev,
+        name: userProfile.name || ''
+      }));
+      setGuestPhone(''); // Clear any guest phone number
+    } else {
+      // User is a guest, ensure name field is clear
+      setOrderDetails(prev => ({ ...prev, name: '' }));
     }
-  }, [currentUser]);
+  }, [currentUser, userProfile]);
 
-  const cartTotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
-  const handleChange = (e) => setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
-
-  const handlePlaceOrder = async () => {
-    if (form.locationType === 'university' && !form.gateNumber) return toast.error('Please select a gate number.');
-    if (form.locationType === 'other' && !form.address) return toast.error('Please provide your address.');
-    if (!currentUser) {
-        toast.error("You must be logged in to place an order.");
-        return;
-    }
-
-    setIsLoading(true);
-    const finalAddress = form.locationType === 'university' ? `Jaypee University, Anoopshahr - Gate ${form.gateNumber}` : form.address;
-    
-    const orderData = {
-      userId: currentUser.uid,
-      customer: { name: form.name, phone: form.phone },
-      address: finalAddress,
-      instructions: form.instructions,
-      paymentMethod: form.paymentMethod,
-      items: cart,
-      total: cartTotal,
-      status: 'Order Placed',
-      createdAt: serverTimestamp(),
-    };
-
-    try {
-      const docRef = await addDoc(collection(db, "orders"), orderData);
-      dispatch({ type: 'CLEAR_CART' });
-      setStep('done');
-      if (onOrderPlaced) {
-        setTimeout(() => onOrderPlaced(docRef.id), 3000);
-      }
-    } catch (error) {
-      console.error("Error placing order: ", error);
-      toast.error('Failed to place order. Please try again.');
-      setIsLoading(false);
-    }
+  const getVerifiedPhone = () => {
+    if (userProfile?.phone) return userProfile.phone;
+    if (currentUser?.phoneNumber) return currentUser.phoneNumber;
+    return '';
   };
 
-  // --- RESTORED: Your full multi-step UI logic ---
-  const renderStep = () => {
-    switch (step) {
-      case 'details':
-        return (
-          <motion.div key="details" initial={{ opacity: 0, x: -50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 50 }} transition={{ duration: 0.3 }} className="space-y-4">
-            <h3 className="font-bold text-lg text-secondary">Your Details</h3>
-            <Input label="Your Name" name="name" value={form.name} onChange={handleChange} required />
-            <Input label="10-Digit Mobile Number" name="phone" type="tel" value={form.phone} onChange={handleChange} required />
-            <Button onClick={() => {
-              if (!form.name || !form.phone.match(/^[6-9]\d{9}$/)) {
-                return toast.error('Please enter a valid name and phone number.');
-              }
-              setStep('location');
-            }}>Continue</Button>
-          </motion.div>
-        );
-      case 'location':
-        return (
-          <motion.div key="location" initial={{ opacity: 0, x: -50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 50 }} transition={{ duration: 0.3 }} className="space-y-4">
-            <h3 className="font-bold text-lg text-secondary">Where should we deliver?</h3>
-            <RadioCard id="uni" value="university" checked={form.locationType === 'university'} onChange={handleChange} name="locationType" label="Jaypee University, Anoopshahr" icon={<FiMapPin size={24} />} />
-            <RadioCard id="other" value="other" checked={form.locationType === 'other'} onChange={handleChange} name="locationType" label="Other Location (within 3-4km)" icon={<FiHome size={24} />} />
-            {userProfile?.addresses?.length > 0 && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mt-4">Or select a saved address</label>
-                <motion.select
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.98 }}
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      setForm(prev => ({...prev, address: e.target.value, locationType: 'other'}));
-                    }
-                  }} 
-                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-primary focus:border-primary"
-                >
-                  <option value="">-- Choose a saved address --</option>
-                  {userProfile.addresses.map(addr => <option key={addr} value={addr}>{addr}</option>)}
-                </motion.select>
-              </div>
-            )}
-            {form.locationType && <Button onClick={() => setStep('address')}>Continue</Button>}
-          </motion.div>
-        );
-      case 'address':
-        return (
-          <motion.div key="address" initial={{ opacity: 0, x: -50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 50 }} transition={{ duration: 0.3 }} className="space-y-4">
-            <h3 className="font-bold text-lg text-secondary">Delivery Details</h3>
-            {form.locationType === 'university' && (
-              <>
-                <Input label="Selected Location" name="uni_location" value="Jaypee University, Anoopshahr" disabled readOnly />
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Select Gate</label>
-                  <motion.select
-                    name="gateNumber"
-                    value={form.gateNumber}
-                    onChange={handleChange}
-                    whileHover={{ scale: 1.03 }}
-                    whileTap={{ scale: 0.98 }}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-primary focus:border-primary"
-                  >
-                    <option value="">-- Select Gate --</option>
-                    <option value="1">Gate 1</option>
-                    <option value="2">Gate 2</option>
-                  </motion.select>
-                </div>
-              </>
-            )}
-            {form.locationType === 'other' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Full Delivery Address</label>
-                <textarea name="address" rows="3" value={form.address} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-primary focus:border-primary" placeholder="e.g., House No., Street Name, Landmark..." required />
-              </div>
-            )}
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Delivery Instructions (Optional)</label>
-              <input name="instructions" value={form.instructions} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-primary focus:border-primary" placeholder="e.g., Call upon arrival" />
-            </div>
-            <Button onClick={() => setStep('payment')}>Proceed to Payment</Button>
-          </motion.div>
-        );
-      case 'payment':
-        return (
-          <motion.div key="payment" initial={{ opacity: 0, x: -50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 50 }} transition={{ duration: 0.3 }} className="space-y-4">
-            <h3 className="font-bold text-lg text-secondary">How would you like to pay?</h3>
-            <RadioCard id="cod" value="CashOnDelivery" checked={form.paymentMethod === 'CashOnDelivery'} onChange={handleChange} name="paymentMethod" label="Cash on Delivery" icon={<FiDollarSign size={24} />} />
-            <div>
-              <input type="radio" id="online" name="paymentMethod" disabled className="hidden" />
-              <label htmlFor="online" className="flex items-center p-4 border rounded-lg cursor-not-allowed bg-gray-100 text-gray-400">
-                <div className="mr-4"><FiCreditCard size={24} /></div>
-                <span className="font-semibold">Pay Online (Coming Soon)</span>
-              </label>
-            </div>
-            <div className="pt-2">
-              <div className="flex justify-between items-center font-bold text-xl mb-4">
-                <span>To Pay:</span>
-                <span className="text-primary">₹{cartTotal}</span>
-              </div>
-              <Button onClick={handlePlaceOrder} isLoading={isLoading}>Place Order</Button>
-            </div>
-          </motion.div>
-        );
-      case 'done':
-        return (
-          <motion.div key="success" className="text-center py-8" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
-            <StarBorder className="rounded-xl">
-              <div className="bg-white p-6 rounded-lg">
-                <FiCheckCircle className="mx-auto text-green-500 mb-4" size={60} />
-                <h3 className="text-2xl font-bold text-secondary">Order Placed!</h3>
-                <p className="text-gray-600 mt-2">Thank you! Your pizza is on its way.</p>
-              </div>
-            </StarBorder>
-          </motion.div>
-        );
-      default:
-        return null;
+  const verifiedPhone = getVerifiedPhone();
+
+  const handleAddressSelect = (index) => {
+    const selectedAddress = userProfile.addresses[index];
+    setOrderDetails(prev => ({
+      ...prev,
+      address: selectedAddress.address,
+      customMessage: selectedAddress.customMessage || '',
+      selectedAddressIndex: index
+    }));
+  };
+
+  const handleUniversitySelect = () => {
+    setOrderDetails(prev => ({
+      ...prev,
+      isUniversity: true,
+      address: '',
+      universityGate: '',
+      selectedAddressIndex: null
+    }));
+  };
+
+  const handleUniversityGateSelect = (gate) => {
+    setOrderDetails(prev => ({
+      ...prev,
+      universityGate: gate,
+      address: `Jaypee University Anoopshahr, ${gate}, A-10, Sector 62, Noida, Uttar Pradesh 201309`
+    }));
+  };
+
+  const handlePlaceOrder = async (e) => {
+    e.preventDefault();
+
+    if (!orderDetails.name.trim()) {
+      toast.error('Please enter your name');
+      return;
     }
+    
+    if (currentUser && !verifiedPhone) {
+      toast.error('Phone number verification required. Please re-login.');
+      return;
+    }
+    if (!currentUser && !guestPhone.trim()) {
+      toast.error('Please enter your phone number');
+      return;
+    }
+    
+    if (!orderDetails.address.trim()) {
+      toast.error('Please enter delivery address');
+      return;
+    }
+    if (orderDetails.isUniversity && !orderDetails.universityGate) {
+      toast.error('Please select university gate');
+      return;
+    }
+    if (cart.length === 0) {
+      toast.error('Your cart is empty');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const orderData = {
+        userId: currentUser ? currentUser.uid : 'guest',
+        userDetails: {
+          name: orderDetails.name.trim(),
+          phone: currentUser ? verifiedPhone.trim() : guestPhone.trim(),
+          address: orderDetails.address.trim(),
+          customMessage: orderDetails.customMessage.trim() || null,
+          isUniversity: orderDetails.isUniversity,
+          universityGate: orderDetails.universityGate || null
+        },
+        items: cart.map(item => ({
+          id: item.id || Math.random().toString(36).substr(2, 9),
+          name: item.name,
+          price: item.price,
+          qty: item.qty,
+          size: item.size || null,
+          addons: item.addons || [],
+          crust: item.crust || null,
+          totalItemPrice: item.totalPrice || (item.price * item.qty)
+        })),
+        totalPrice: cartTotal,
+        status: 'Order Placed',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        orderNumber: Math.random().toString(36).substr(2, 9).toUpperCase()
+      };
+
+      await addDoc(collection(db, 'orders'), orderData);
+      
+      if (currentUser && userProfile) {
+        await updateDoc(doc(db, 'users', currentUser.uid), {
+          name: orderDetails.name.trim(),
+          lastOrderDate: new Date()
+        });
+      }
+      
+      dispatch({ type: 'CLEAR_CART' });
+      toast.success('🎉 Order placed successfully!');
+      onOrderPlaced();
+    } catch (error) {
+      console.error('Error placing order:', error);
+      toast.error('Failed to place order. Please try again.');
+    }
+
+    setLoading(false);
   };
 
   return (
-    <motion.div>
-      <AnimatePresence mode="wait">
-        {renderStep()}
-      </AnimatePresence>
-    </motion.div>
+    <div className="bg-gray-900 text-gray-200">
+      <form onSubmit={handlePlaceOrder} className="space-y-6">
+        <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 sm:p-6">
+          <h3 className="text-lg font-semibold text-gray-200 mb-4">Personal Details</h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Full Name *
+              </label>
+              <div className="relative">
+                <FiUser className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+                <input
+                  type="text"
+                  name="name"
+                  autoComplete="name"
+                  value={orderDetails.name}
+                  onChange={(e) => setOrderDetails(prev => ({ ...prev, name: e.target.value }))}
+                  readOnly={!!currentUser}
+                  className={`w-full pl-10 pr-4 py-3 border rounded-lg placeholder-gray-400 focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-colors ${
+                    currentUser
+                      ? 'bg-gray-600 border-gray-500 text-gray-300 cursor-not-allowed'
+                      : 'bg-gray-700 border-gray-600 text-gray-200'
+                  }`}
+                  placeholder="Enter your full name"
+                  required
+                />
+              </div>
+              {currentUser && (
+                  <p className="text-xs text-gray-400 mt-2">
+                    Name pre-filled from your profile.
+                  </p>
+              )}
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Phone Number *
+              </label>
+              {currentUser ? (
+                verifiedPhone ? (
+                  <>
+                    <div className="relative">
+                      <FiPhone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-green-400" size={18} />
+                      <input
+                        type="tel"
+                        value={verifiedPhone}
+                        className="w-full pl-10 pr-12 py-3 bg-gray-600 border border-gray-500 rounded-lg text-gray-200 font-mono cursor-not-allowed"
+                        readOnly
+                      />
+                       <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                          <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
+                        </div>
+                    </div>
+                     <div className="flex items-center mt-2">
+                        <FiCheckCircle size={14} className="text-green-400 mr-1" />
+                        <p className="text-xs text-green-400">✓ Verified Phone Number</p>
+                      </div>
+                  </>
+                ) : (
+                   <>
+                    <div className="relative">
+                        <FiAlertTriangle className="absolute left-3 top-1/2 transform -translate-y-1/2 text-yellow-400" size={18} />
+                        <input
+                          type="text"
+                          value="Phone number not found"
+                          className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-dashed border-gray-600 rounded-lg text-yellow-400 cursor-not-allowed"
+                          readOnly
+                        />
+                      </div>
+                      <div className="flex items-center mt-2">
+                        <p className="text-xs text-yellow-500">
+                          ⚠️ Please re-login to verify your phone number.
+                        </p>
+                      </div>
+                   </>
+                )
+              ) : (
+                <div className="relative">
+                  <FiPhone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+                  <input
+                    type="tel"
+                    name="tel"
+                    autoComplete="tel"
+                    value={guestPhone}
+                    onChange={(e) => setGuestPhone(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-gray-200 placeholder-gray-400 focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                    placeholder="Enter your phone number"
+                    required
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 sm:p-6">
+          <h3 className="text-lg font-semibold text-gray-200 mb-4">Delivery Address</h3>
+          
+          <div className="mb-6 p-4 bg-orange-900/20 border border-orange-700/50 rounded-lg">
+            <h4 className="font-medium text-orange-400 mb-3 flex items-center">
+              🎓 Jaypee University Anoopshahr - Special Delivery
+            </h4>
+            
+            {!orderDetails.isUniversity ? (
+              <button type="button" onClick={handleUniversitySelect} className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors">
+                Select University Address
+              </button>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-orange-300">Select your gate:</p>
+                <div className="flex flex-wrap gap-3">
+                  {['Gate 1', 'Gate 2'].map(gate => (
+                    <button key={gate} type="button" onClick={() => handleUniversityGateSelect(gate)} className={`px-4 py-2 rounded-lg transition-colors ${orderDetails.universityGate === gate ? 'bg-orange-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>
+                      {gate}
+                    </button>
+                  ))}
+                </div>
+                {orderDetails.universityGate && (
+                  <div className="mt-3 p-3 bg-gray-700 rounded-lg">
+                    <p className="text-sm text-gray-300">📍 {orderDetails.address}</p>
+                  </div>
+                )}
+                <button type="button" onClick={() => setOrderDetails(prev => ({ ...prev, isUniversity: false, universityGate: '', address: '' }))} className="text-sm text-orange-400 hover:text-orange-300 mt-2">
+                  Use a different address
+                </button>
+              </div>
+            )}
+          </div>
+          
+          {userProfile?.addresses && userProfile.addresses.length > 0 && !orderDetails.isUniversity && (
+            <div className="mb-4">
+              <p className="text-sm font-medium text-gray-300 mb-3">Choose from saved addresses:</p>
+              <div className="space-y-2">
+                {userProfile.addresses.map((address, index) => (
+                  <button key={index} type="button" onClick={() => handleAddressSelect(index)} className={`w-full text-left p-3 rounded-lg border-2 transition-colors ${orderDetails.selectedAddressIndex === index ? 'border-orange-500 bg-orange-500/10' : 'border-gray-600 bg-gray-700 hover:border-gray-500'}`}>
+                    <div className="flex items-start">
+                      <FiMapPin className="text-orange-400 mr-2 mt-1 flex-shrink-0" size={16} />
+                      <div className="flex-1">
+                        <p className="text-sm text-gray-200 leading-relaxed">{address.address}</p>
+                        {address.customMessage && (
+                          <p className="text-xs text-gray-400 mt-1">📝 {address.customMessage}</p>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <div className="my-4 flex items-center">
+                <div className="flex-1 border-t border-gray-600"></div>
+                <span className="px-3 text-sm text-gray-400">OR</span>
+                <div className="flex-1 border-t border-gray-600"></div>
+              </div>
+            </div>
+          )}
+          
+          {!orderDetails.isUniversity && (
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Enter Delivery Address *
+              </label>
+              <div className="relative">
+                <FiMapPin className="absolute left-3 top-3.5 text-gray-400" size={18} />
+                <textarea
+                  name="street-address"
+                  autoComplete="street-address"
+                  value={orderDetails.address}
+                  onChange={(e) => setOrderDetails(prev => ({ ...prev, address: e.target.value, selectedAddressIndex: null }))}
+                  rows={3}
+                  className="w-full pl-10 pr-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-gray-200 placeholder-gray-400 focus:ring-2 focus:ring-orange-500 focus:border-transparent resize-none"
+                  placeholder="Enter your complete delivery address..."
+                  required={!orderDetails.isUniversity}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Special Delivery Instructions (Optional)
+            </label>
+            <div className="relative">
+              <FiMessageSquare className="absolute left-3 top-3.5 text-gray-400" size={18} />
+              <textarea
+                value={orderDetails.customMessage}
+                onChange={(e) => setOrderDetails(prev => ({ ...prev, customMessage: e.target.value }))}
+                rows={2}
+                className="w-full pl-10 pr-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-gray-200 placeholder-gray-400 focus:ring-2 focus:ring-orange-500 focus:border-transparent resize-none"
+                placeholder="e.g., Call on arrival..."
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 sm:p-6">
+          <h3 className="text-lg font-semibold text-gray-200 mb-4">Order Summary</h3>
+          <div className="space-y-3 mb-4">
+            {cart.length > 0 ? cart.map((item, index) => (
+              <div key={item.id || index} className="flex justify-between items-start bg-gray-700 p-3 rounded-lg">
+                <div className="flex-1 mr-4">
+                  <h4 className="font-medium text-gray-200">{item.name}</h4>
+                  {item.size && <p className="text-sm text-gray-400">Size: {item.size}</p>}
+                  {item.crust && <p className="text-sm text-gray-400">Crust: {item.crust.name}</p>}
+                  {item.addons && item.addons.length > 0 && (
+                    <p className="text-sm text-gray-400">Extras: {item.addons.map(addon => addon.name).join(', ')}</p>
+                  )}
+                  <p className="text-sm text-gray-400">Quantity: {item.qty}</p>
+                </div>
+                <div className="text-right">
+                  <p className="font-bold text-orange-400">₹{item.totalPrice || (item.price * item.qty)}</p>
+                </div>
+              </div>
+            )) : <p className="text-center text-gray-400">Your cart is empty.</p>}
+          </div>
+          <div className="border-t border-gray-600 pt-4">
+            <div className="flex justify-between items-center text-lg font-bold">
+              <span className="text-gray-200">Total Amount:</span>
+              <span className="text-orange-400">₹{cartTotal.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+
+        <motion.button
+          type="submit"
+          disabled={loading || cart.length === 0}
+          whileHover={{ scale: (loading || cart.length === 0) ? 1 : 1.02 }}
+          whileTap={{ scale: (loading || cart.length === 0) ? 1 : 0.98 }}
+          className="w-full bg-orange-600 text-white py-4 rounded-lg font-bold text-lg hover:bg-orange-700 focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 focus:ring-offset-gray-900 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+        >
+          {loading ? (
+            <div className="flex items-center justify-center">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white mr-3"></div>
+              Placing Order...
+            </div>
+          ) : cart.length === 0 ? (
+            'Your Cart is Empty'
+          ) : (
+            `Place Order - ₹${cartTotal.toFixed(2)}`
+          )}
+        </motion.button>
+      </form>
+    </div>
   );
 }
