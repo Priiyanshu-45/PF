@@ -30,7 +30,7 @@ export default function LoginPopup({ isOpen, onClose, onLogin }) {
         setupRecaptcha();
       }
     }
-    // Cleanup on component unmount
+    // Cleanup on component unmount or close
     return () => {
       if (window.recaptchaVerifier) {
         window.recaptchaVerifier.clear();
@@ -41,12 +41,16 @@ export default function LoginPopup({ isOpen, onClose, onLogin }) {
 
   const setupRecaptcha = () => {
     try {
+      // Ensure any old instance is cleared before creating a new one
       if (window.recaptchaVerifier) {
         window.recaptchaVerifier.clear();
       }
+      
+      // This sets up the INVISIBLE reCAPTCHA
+      // It will only show a challenge if Google detects suspicious activity
       window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
         'size': 'invisible',
-        'callback': () => console.log('reCAPTCHA solved'),
+        'callback': () => console.log('reCAPTCHA auto-verified.'),
         'expired-callback': () => toast.error('Verification expired. Please try again.')
       });
     } catch (error) {
@@ -63,19 +67,25 @@ export default function LoginPopup({ isOpen, onClose, onLogin }) {
     }
 
     setLoading(true);
+    const toastId = toast.loading('Running security check...'); // Provide feedback for the invisible check
+
     try {
       const formattedPhone = `+91${phoneNumber}`;
       const appVerifier = window.recaptchaVerifier;
       if (!appVerifier) {
-        throw new Error("reCAPTCHA not initialized. Please wait a moment and try again.");
+        throw new Error("reCAPTCHA not ready. Please wait a moment and try again.");
       }
 
       const confirmation = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
+      
+      toast.dismiss(toastId);
+      toast.success('🎯 OTP sent successfully!');
+      
       setConfirmationResult(confirmation);
       setStep('otp');
       setTimeLeft(60); // Start 60-second timer
-      toast.success('🎯 OTP sent successfully!');
     } catch (error) {
+      toast.dismiss(toastId);
       console.error('OTP send error:', error);
       if (error.code === 'auth/too-many-requests') {
         toast.error('Too many attempts. Please wait and try again.');
@@ -227,7 +237,7 @@ export default function LoginPopup({ isOpen, onClose, onLogin }) {
                   </div>
                 </div>
                 <button type="submit" disabled={loading || phoneNumber.length !== 10} className="w-full bg-orange-600 text-white py-3 rounded-lg font-semibold text-lg hover:bg-orange-700 disabled:opacity-50 transition-all">
-                  {loading ? 'Sending...' : 'Send OTP'}
+                  {loading ? 'Verifying...' : 'Send OTP'}
                 </button>
               </form>
             )}
@@ -289,7 +299,8 @@ export default function LoginPopup({ isOpen, onClose, onLogin }) {
               </form>
             )}
             
-            <div id="recaptcha-container" className="my-4"></div>
+            {/* This div is required for the invisible reCAPTCHA to work */}
+            <div id="recaptcha-container"></div>
           </motion.div>
         </motion.div>
       )}
