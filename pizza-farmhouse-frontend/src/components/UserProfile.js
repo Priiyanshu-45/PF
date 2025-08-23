@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiX, FiMapPin, FiPlus, FiTrash2, FiEdit, FiTruck, FiClock, FiCheckCircle, FiPhone, FiUser, FiSave, FiAlertTriangle } from 'react-icons/fi';
+import { FiX, FiMapPin, FiPlus, FiTrash2, FiEdit, FiTruck, FiClock, FiCheckCircle, FiPhone, FiUser, FiSave, FiAlertTriangle, FiLoader } from 'react-icons/fi';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../firebase';
 import { doc, updateDoc, onSnapshot, collection, query, where, orderBy } from 'firebase/firestore';
@@ -44,7 +44,6 @@ const AddressForm = ({ address = null, onSave, onCancel }) => {
             Use University Address
           </button>
         </div>
-
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-2">
             Delivery Address *
@@ -58,7 +57,6 @@ const AddressForm = ({ address = null, onSave, onCancel }) => {
             required
           />
         </div>
-
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-2">
             Special Instructions (Optional)
@@ -71,7 +69,6 @@ const AddressForm = ({ address = null, onSave, onCancel }) => {
             placeholder="Any special delivery instructions..."
           />
         </div>
-
         <div className="flex space-x-3 pt-4">
           <button
             type="button"
@@ -99,10 +96,8 @@ const OrderStatus = ({ status }) => {
     'Out for Delivery': { icon: FiTruck, color: 'text-orange-400 bg-orange-900/30' },
     'Delivered': { icon: FiCheckCircle, color: 'text-green-400 bg-green-900/30' },
   };
-  
   const config = statusConfig[status] || statusConfig['Order Placed'];
   const StatusIcon = config.icon;
-  
   return (
     <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${config.color}`}>
       <StatusIcon size={16} className="mr-1" />
@@ -117,18 +112,12 @@ export default function UserProfile({ isOpen, onClose }) {
   const [editingAddressIndex, setEditingAddressIndex] = useState(null);
   const [userOrders, setUserOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
-  
-  const { currentUser, userProfile } = useAuth();
-
-  // --- NEW STATE FOR EDITING NAME ---
+  const { currentUser, userProfile, loading: authLoading } = useAuth();
   const [isEditingName, setIsEditingName] = useState(false);
   const [name, setName] = useState('');
 
   useEffect(() => {
-    // Populate name for editing
-    if (userProfile?.name) {
-      setName(userProfile.name);
-    }
+    if (userProfile?.name) setName(userProfile.name);
 
     if (!currentUser) return;
 
@@ -138,7 +127,6 @@ export default function UserProfile({ isOpen, onClose }) {
       where('userId', '==', currentUser.uid),
       orderBy('createdAt', 'desc')
     );
-
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const orders = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -151,11 +139,9 @@ export default function UserProfile({ isOpen, onClose }) {
       console.error("Error fetching orders:", error);
       setOrdersLoading(false);
     });
-
     return () => unsubscribe();
   }, [currentUser, userProfile]);
 
-  // --- NEW FUNCTION TO SAVE NAME ---
   const handleSaveName = async () => {
     if (!name.trim()) {
       toast.error('Name cannot be empty');
@@ -180,7 +166,6 @@ export default function UserProfile({ isOpen, onClose }) {
   const handleSaveAddress = async (addressData) => {
     try {
       const updatedAddresses = [...(userProfile?.addresses || [])];
-      
       if (editingAddressIndex !== null) {
         updatedAddresses[editingAddressIndex] = addressData;
       } else {
@@ -190,11 +175,9 @@ export default function UserProfile({ isOpen, onClose }) {
         }
         updatedAddresses.push(addressData);
       }
-
       await updateDoc(doc(db, 'users', currentUser.uid), {
         addresses: updatedAddresses
       });
-
       setIsEditingAddress(false);
       setEditingAddressIndex(null);
       toast.success('Address saved successfully');
@@ -217,13 +200,11 @@ export default function UserProfile({ isOpen, onClose }) {
     }
   };
 
-  // Get phone number with proper fallback
   const getPhoneNumber = () => {
     if (userProfile?.phone) return userProfile.phone;
     if (currentUser?.phoneNumber) return currentUser.phoneNumber;
     return null;
   };
-
   const verifiedPhone = getPhoneNumber();
 
   return (
@@ -250,7 +231,6 @@ export default function UserProfile({ isOpen, onClose }) {
                 <FiX size={24} />
               </button>
             </div>
-
             {/* Tabs */}
             <div className="border-b border-gray-600 flex-shrink-0">
               <div className="flex space-x-8 px-6">
@@ -270,104 +250,109 @@ export default function UserProfile({ isOpen, onClose }) {
                 ))}
               </div>
             </div>
-
             {/* Content */}
             <div className="p-6 overflow-y-auto">
               {activeTab === 'profile' && (
                 <div className="space-y-6">
-                  {/* --- NAME (NOW EDITABLE) --- */}
-                  <div>
-                    <div className="flex justify-between items-center mb-2">
-                      <label className="block text-sm font-medium text-gray-300">
-                        <FiUser className="inline mr-2" size={16} />
-                        Full Name
-                      </label>
-                      {!isEditingName && (
-                        <button onClick={() => setIsEditingName(true)} className="text-blue-400 hover:text-blue-300 p-1">
-                          <FiEdit size={16} />
-                        </button>
+                  {/* --- LOADING --- */}
+                  {authLoading ? (
+                    <div className="flex items-center justify-center p-8">
+                      <FiLoader className="animate-spin text-orange-500" size={24} />
+                      <span className="ml-2 text-gray-400">Loading profile...</span>
+                    </div>
+                  ) : !userProfile ? (
+                    <div className="text-center p-8 text-gray-400">Could not load user profile.</div>
+                  ) : (
+                    <>
+                    {/* --- NAME (EDITABLE) --- */}
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <label className="block text-sm font-medium text-gray-300">
+                          <FiUser className="inline mr-2" size={16} />
+                          Full Name
+                        </label>
+                        {!isEditingName && (
+                          <button onClick={() => setIsEditingName(true)} className="text-blue-400 hover:text-blue-300 p-1">
+                            <FiEdit size={16} />
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        readOnly={!isEditingName}
+                        className={`w-full p-3 border rounded-lg transition-colors ${
+                          isEditingName
+                            ? 'bg-gray-800 border-orange-500 text-gray-200'
+                            : 'bg-gray-700 border-gray-600 text-gray-200 cursor-default'
+                        }`}
+                      />
+                      {isEditingName && (
+                        <div className="flex space-x-3 mt-3">
+                          <button onClick={handleCancelEditName} className="flex-1 px-4 py-2 border border-gray-600 text-gray-300 rounded-lg hover:bg-gray-700">
+                            Cancel
+                          </button>
+                          <button onClick={handleSaveName} className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center justify-center">
+                            <FiSave size={16} className="mr-2" />
+                            Save
+                          </button>
+                        </div>
                       )}
                     </div>
-                    <input
-                      type="text"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      readOnly={!isEditingName}
-                      className={`w-full p-3 border rounded-lg transition-colors ${
-                        isEditingName 
-                        ? 'bg-gray-800 border-orange-500 text-gray-200' 
-                        : 'bg-gray-700 border-gray-600 text-gray-200 cursor-default'
-                      }`}
-                    />
-                    {isEditingName && (
-                      <div className="flex space-x-3 mt-3">
-                        <button onClick={handleCancelEditName} className="flex-1 px-4 py-2 border border-gray-600 text-gray-300 rounded-lg hover:bg-gray-700">
-                          Cancel
-                        </button>
-                        <button onClick={handleSaveName} className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center justify-center">
-                          <FiSave size={16} className="mr-2" />
-                          Save
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* Phone Number */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                      <FiPhone className="inline mr-2" size={16} />
-                      Phone Number
-                    </label>
-                    {verifiedPhone ? (
-                      <div>
-                        <div className="relative">
-                          <input
-                            type="text"
-                            value={verifiedPhone}
-                            className="w-full p-3 border border-gray-500 rounded-lg bg-gray-600 text-gray-200 font-mono text-lg cursor-not-allowed"
-                            readOnly
-                          />
-                          <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                            <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
+                    {/* Verified Phone */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">
+                        <FiPhone className="inline mr-2" size={16} />
+                        Phone Number
+                      </label>
+                      {verifiedPhone ? (
+                        <div>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={verifiedPhone}
+                              className="w-full p-3 border border-gray-500 rounded-lg bg-gray-600 text-gray-200 font-mono text-lg cursor-not-allowed"
+                              readOnly
+                            />
+                            <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                              <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
+                            </div>
+                          </div>
+                          <div className="flex items-center mt-2">
+                            <FiCheckCircle size={14} className="text-green-400 mr-2" />
+                            <p className="text-xs text-green-400 font-medium">Verified Phone Number</p>
                           </div>
                         </div>
-                        <div className="flex items-center mt-2">
-                          <FiCheckCircle size={14} className="text-green-400 mr-2" />
-                          <p className="text-xs text-green-400 font-medium">Verified Phone Number</p>
+                      ) : (
+                        <div className="flex items-center p-3 bg-yellow-900/30 border border-yellow-700/50 rounded-lg">
+                          <FiAlertTriangle className="text-yellow-400 mr-3" size={20}/>
+                          <span className="text-sm text-yellow-300">Phone number not available.</span>
                         </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center p-3 bg-yellow-900/30 border border-yellow-700/50 rounded-lg">
-                        <FiAlertTriangle className="text-yellow-400 mr-3" size={20}/>
-                        <span className="text-sm text-yellow-300">Phone number not available.</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* --- EMAIL SECTION REMOVED --- */}
-
-                  {/* Account Info */}
-                  <div className="mt-6 p-4 bg-blue-900/20 border border-blue-700/50 rounded-lg">
-                    <h4 className="font-medium text-blue-400 mb-2">📱 Account Information</h4>
-                    <div className="text-sm text-gray-300 space-y-1">
-                      <p>• Phone number verified during login</p>
-                      <p>• Account created: {userProfile?.createdAt?.toDate ? userProfile.createdAt.toDate().toLocaleDateString('en-IN') : 'Recently'}</p>
-                      <p>• Profile secure and verified</p>
+                      )}
                     </div>
-                  </div>
+                    {/* Account Info */}
+                    <div className="mt-6 p-4 bg-blue-900/20 border border-blue-700/50 rounded-lg">
+                      <h4 className="font-medium text-blue-400 mb-2">📱 Account Information</h4>
+                      <div className="text-sm text-gray-300 space-y-1">
+                        <p>• Phone number verified during login</p>
+                        <p>• Account created: {userProfile?.createdAt?.toDate ? userProfile.createdAt.toDate().toLocaleDateString('en-IN') : 'Recently'}</p>
+                        <p>• Profile secure and verified</p>
+                      </div>
+                    </div>
+                    </>
+                  )}
                 </div>
               )}
-
               {activeTab === 'addresses' && (
-                // Addresses tab content remains the same
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
                     <h3 className="text-lg font-medium text-gray-200">Saved Addresses</h3>
                     {!isEditingAddress && (userProfile?.addresses || []).length < 3 && (
                       <button
                         onClick={() => {
-                            setEditingAddressIndex(null);
-                            setIsEditingAddress(true);
+                          setEditingAddressIndex(null);
+                          setIsEditingAddress(true);
                         }}
                         className="flex items-center px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600"
                       >
@@ -437,12 +422,9 @@ export default function UserProfile({ isOpen, onClose }) {
                   )}
                 </div>
               )}
-
               {activeTab === 'orders' && (
-                // Orders tab content remains the same
                 <div className="space-y-4">
                   <h3 className="text-lg font-medium text-gray-200">Order History</h3>
-                  
                   {ordersLoading ? (
                     <div className="text-center py-8">
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500 mx-auto"></div>
@@ -468,7 +450,6 @@ export default function UserProfile({ isOpen, onClose }) {
                             </div>
                             <OrderStatus status={order.status || 'Order Placed'} />
                           </div>
-                          
                           <div className="space-y-2">
                             {order.items.map((item, index) => (
                               <div key={index} className="flex justify-between text-sm">
@@ -487,7 +468,6 @@ export default function UserProfile({ isOpen, onClose }) {
                               </div>
                             ))}
                           </div>
-                          
                           <div className="border-t border-gray-600 mt-3 pt-3">
                             <div className="flex justify-between font-bold text-gray-200">
                               <span>Total:</span>

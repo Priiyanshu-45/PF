@@ -41,13 +41,9 @@ export default function LoginPopup({ isOpen, onClose, onLogin }) {
 
   const setupRecaptcha = () => {
     try {
-      // Ensure any old instance is cleared before creating a new one
       if (window.recaptchaVerifier) {
         window.recaptchaVerifier.clear();
       }
-      
-      // This sets up the INVISIBLE reCAPTCHA
-      // It will only show a challenge if Google detects suspicious activity
       window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
         'size': 'invisible',
         'callback': () => console.log('reCAPTCHA auto-verified.'),
@@ -67,7 +63,7 @@ export default function LoginPopup({ isOpen, onClose, onLogin }) {
     }
 
     setLoading(true);
-    const toastId = toast.loading('Running security check...'); // Provide feedback for the invisible check
+    const toastId = toast.loading('Running security check...');
 
     try {
       const formattedPhone = `+91${phoneNumber}`;
@@ -83,7 +79,7 @@ export default function LoginPopup({ isOpen, onClose, onLogin }) {
       
       setConfirmationResult(confirmation);
       setStep('otp');
-      setTimeLeft(60); // Start 60-second timer
+      setTimeLeft(60);
     } catch (error) {
       toast.dismiss(toastId);
       console.error('OTP send error:', error);
@@ -97,13 +93,20 @@ export default function LoginPopup({ isOpen, onClose, onLogin }) {
     }
   };
 
+  // MODIFIED: handleOtpChange to include auto-submit
   const handleOtpChange = (index, value) => {
-    if (!/^\d*$/.test(value)) return; // Only allow digits
+    if (!/^\d*$/.test(value)) return;
     const newOtp = [...otp];
-    newOtp[index] = value.slice(-1); // Take only the last digit
+    newOtp[index] = value.slice(-1);
     setOtp(newOtp);
+
     if (value && index < 5) {
       document.getElementById(`otp-${index + 1}`)?.focus();
+    }
+
+    const completeOtp = newOtp.join('');
+    if (completeOtp.length === 6) {
+      handleVerifyOTP(completeOtp);
     }
   };
 
@@ -112,10 +115,23 @@ export default function LoginPopup({ isOpen, onClose, onLogin }) {
       document.getElementById(`otp-${index - 1}`)?.focus();
     }
   };
-
-  const handleVerifyOTP = async (e) => {
+  
+  // NEW: handlePaste for OTP
+  const handlePaste = (e) => {
     e.preventDefault();
-    const otpCode = otp.join('');
+    const pastedData = e.clipboardData.getData('text').trim().slice(0, 6);
+    if (/^\d{6}$/.test(pastedData)) {
+      const newOtp = pastedData.split('');
+      setOtp(newOtp);
+      document.getElementById('otp-5')?.focus();
+      handleVerifyOTP(pastedData);
+    } else {
+      toast.error('Invalid paste. Please paste a 6-digit code.');
+    }
+  };
+
+  // MODIFIED: handleVerifyOTP now takes otpCode as an argument
+  const handleVerifyOTP = async (otpCode) => {
     if (otpCode.length !== 6) {
       toast.error('Please enter the complete 6-digit OTP');
       return;
@@ -140,8 +156,7 @@ export default function LoginPopup({ isOpen, onClose, onLogin }) {
       } else if (error.code === 'auth/code-expired') {
         toast.error('OTP has expired. Please request a new one.');
         setStep('phone');
-      }
-      else {
+      } else {
         toast.error('Verification failed. Please try again.');
       }
       setOtp(['', '', '', '', '', '']);
@@ -243,12 +258,12 @@ export default function LoginPopup({ isOpen, onClose, onLogin }) {
             )}
 
             {step === 'otp' && (
-              <form onSubmit={handleVerifyOTP} className="space-y-6">
+              <form onSubmit={(e) => { e.preventDefault(); handleVerifyOTP(otp.join('')); }} className="space-y-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-3 text-center">
                     Enter OTP sent to +91 {phoneNumber}
                   </label>
-                  <div className="flex justify-center gap-2 sm:gap-3">
+                  <div className="flex justify-center gap-2 sm:gap-3" onPaste={handlePaste}>
                     {otp.map((digit, index) => (
                       <input
                         key={index}
@@ -257,7 +272,7 @@ export default function LoginPopup({ isOpen, onClose, onLogin }) {
                         value={digit}
                         onChange={(e) => handleOtpChange(index, e.target.value)}
                         onKeyDown={(e) => handleOtpKeyDown(index, e)}
-                        className="w-10 h-12 sm:w-12 sm:h-14 text-center text-xl font-bold bg-gray-700 border border-gray-600 rounded-lg text-gray-200 focus:ring-2 focus:ring-orange-500"
+                        className="flex-1 max-w-[3.5rem] h-14 sm:h-16 text-center text-xl font-bold bg-gray-700 border border-gray-600 rounded-lg text-gray-200 focus:ring-2 focus:ring-orange-500"
                         maxLength={1}
                         autoComplete="one-time-code"
                       />
@@ -299,7 +314,6 @@ export default function LoginPopup({ isOpen, onClose, onLogin }) {
               </form>
             )}
             
-            {/* This div is required for the invisible reCAPTCHA to work */}
             <div id="recaptcha-container"></div>
           </motion.div>
         </motion.div>

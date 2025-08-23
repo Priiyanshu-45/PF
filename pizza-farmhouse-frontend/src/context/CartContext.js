@@ -1,3 +1,4 @@
+// src/context/CartContext.js
 import React, { createContext, useContext, useReducer, useEffect } from "react";
 
 const CartContext = createContext();
@@ -7,44 +8,41 @@ const loadInitialState = () => {
   try {
     const serializedState = localStorage.getItem('pizzaFarmhouseCart');
     if (serializedState === null) {
-      return { items: [] };
+      return { items: [] }; // If nothing is in storage, return an empty cart
     }
     const parsedState = JSON.parse(serializedState);
+    // Ensure the loaded state has the correct structure
     return Array.isArray(parsedState.items) ? parsedState : { items: [] };
   } catch (err) {
     console.error("Could not load cart from localStorage", err);
-    return { items: [] };
+    return { items: [] }; // Return empty cart on error
   }
 };
 
 function cartReducer(state, action) {
   switch (action.type) {
     case "ADD_ITEM":
-      const existingItem = state.items.find(item =>
+      // Check if the exact same item (with same size, addons, crust) already exists
+      const existingItemIndex = state.items.findIndex(item =>
         item.id === action.item.id &&
         item.size === action.item.size &&
         JSON.stringify(item.addons) === JSON.stringify(action.item.addons) &&
         JSON.stringify(item.crust) === JSON.stringify(action.item.crust)
       );
 
-      if (existingItem) {
-        return {
-          ...state,
-          items: state.items.map(item =>
-            item.id === action.item.id &&
-            item.size === action.item.size &&
-            JSON.stringify(item.addons) === JSON.stringify(action.item.addons) &&
-            JSON.stringify(item.crust) === JSON.stringify(action.item.crust)
-              ? { ...item, qty: item.qty + action.item.qty }
-              : item
-          ),
-        };
+      if (existingItemIndex > -1) {
+        // If it exists, update the quantity and total price
+        const updatedItems = [...state.items];
+        const existingItem = updatedItems[existingItemIndex];
+        existingItem.qty += action.item.qty;
+        // Recalculate total price for the updated quantity
+        existingItem.totalItemPrice = (existingItem.price + (existingItem.addons || []).reduce((sum, addon) => sum + addon.price, 0) + (existingItem.crust ? existingItem.crust.price : 0)) * existingItem.qty;
+        return { ...state, items: updatedItems };
       }
+      // Otherwise, add the new item to the cart
       return { ...state, items: [...state.items, action.item] };
 
     case "REMOVE_ITEM":
-      // Your existing logic is slightly different from the new one.
-      // We will keep the original logic for simplicity and correctness with the existing code.
       return {
         ...state,
         items: state.items.filter((_, i) => i !== action.index),
@@ -52,11 +50,12 @@ function cartReducer(state, action) {
 
     case "UPDATE_QTY":
       const updatedItemsQty = [...state.items];
-      updatedItemsQty[action.index].qty = action.qty;
+      if(updatedItemsQty[action.index]) {
+        updatedItemsQty[action.index].qty = action.qty;
+      }
       return { ...state, items: updatedItemsQty };
 
     case "CLEAR_CART":
-      // Consistent with the new logic, but returns an object to match the state structure {items: []}
       return { items: [] };
       
     default:
@@ -65,8 +64,12 @@ function cartReducer(state, action) {
 }
 
 export function CartProvider({ children }) {
+  // FIX: Initialize the reducer with the `loadInitialState` function.
+  // This is the key to restoring the cart on page load.
   const [state, dispatch] = useReducer(cartReducer, null, loadInitialState);
 
+  // FIX: This effect will run every time the `state` (the cart) changes.
+  // It saves the current state to localStorage, persisting it across refreshes.
   useEffect(() => {
     try {
       const serializedState = JSON.stringify(state);
@@ -76,6 +79,7 @@ export function CartProvider({ children }) {
     }
   }, [state]);
 
+  // Provide the cart items directly for easier access in components
   return (
     <CartContext.Provider value={{ cart: state.items, dispatch }}>
       {children}
